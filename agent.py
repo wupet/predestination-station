@@ -3,6 +3,7 @@ import uuid
 from flask import Flask, request, jsonify
 from threading import Lock
 from collections import deque
+from tron_q_agent import QAgent
 
 from case_closed_game import Game, Direction, GameResult
 
@@ -98,7 +99,8 @@ def send_move():
     # -----------------your code here-------------------
     # Simple example: always go RIGHT (replace this with your logic)
     # To use a boost: move = "RIGHT:BOOST"
-    move = "RIGHT"
+    agent = AgentClass(initialized_parameters...)  # Initialize your agent here
+    move = agent.choose_action(game_state)
     
     # Example: Use boost if available and it's late in the game
     # turn_count = state.get("turn_count", 0)
