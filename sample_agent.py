@@ -6,8 +6,13 @@ This agent runs as a Flask server and responds to judge requests.
 import os
 from flask import Flask, request, jsonify
 from collections import deque
+from agentw import AgentW
+from agents import AgentS
+from agentc import AgentC
 
 app = Flask(__name__)
+
+agent = AgentW()
 
 # Basic identity
 PARTICIPANT = os.getenv("PARTICIPANT", "SampleParticipant")
@@ -54,22 +59,13 @@ def send_move():
     
     Return format: {"move": "DIRECTION"} or {"move": "DIRECTION:BOOST"}
     """
-    player_number = request.args.get("player_number", default=1, type=int)
-    turn_count = game_state.get("turn_count", 0)
+    # player_number = request.args.get("player_number", default=1, type=int)
     
-    # Get our current state
-    if player_number == 1:
-        my_trail = game_state.get("agent1_trail", [])
-        my_boosts = game_state.get("agent1_boosts", 3)
-        other_trail = game_state.get("agent2_trail", [])
-    else:
-        my_trail = game_state.get("agent2_trail", [])
-        my_boosts = game_state.get("agent2_boosts", 3)
-        other_trail = game_state.get("agent1_trail", [])
+    move = agent.choose_action(game_state)
+
     
     # Simple decision logic
-    move = decide_move(my_trail, other_trail, turn_count, my_boosts)
-    
+    print(move)
     return jsonify({"move": move}), 200
 
 
@@ -81,70 +77,6 @@ def end_game():
         result = data.get("result", "UNKNOWN")
         print(f"\nGame Over! Result: {result}")
     return jsonify({"status": "acknowledged"}), 200
-
-
-def decide_move(my_trail, other_trail, turn_count, my_boosts):
-    """Simple decision logic for the agent.
-    
-    Strategy:
-    - Move in a direction that doesn't immediately hit a trail
-    - Use boost if we have them and it's mid-game (turns 30-80)
-    """
-    if not my_trail:
-        return "RIGHT"
-    
-    # Get current head position and direction
-    head = my_trail[-1] if my_trail else (0, 0)
-    
-    # Calculate current direction if we have at least 2 positions
-    current_dir = "RIGHT"
-    if len(my_trail) >= 2:
-        prev = my_trail[-2]
-        dx = head[0] - prev[0]
-        dy = head[1] - prev[1]
-        
-        # Normalize for torus wrapping
-        if abs(dx) > 1:
-            dx = -1 if dx > 0 else 1
-        if abs(dy) > 1:
-            dy = -1 if dy > 0 else 1
-        
-        if dx == 1:
-            current_dir = "RIGHT"
-        elif dx == -1:
-            current_dir = "LEFT"
-        elif dy == 1:
-            current_dir = "DOWN"
-        elif dy == -1:
-            current_dir = "UP"
-    
-    # Simple strategy: try to avoid trails, prefer continuing straight
-    # Check available directions (not opposite to current)
-    directions = ["UP", "DOWN", "LEFT", "RIGHT"]
-    opposite = {"UP": "DOWN", "DOWN": "UP", "LEFT": "RIGHT", "RIGHT": "LEFT"}
-    
-    # Remove opposite direction
-    if current_dir in opposite:
-        try:
-            directions.remove(opposite[current_dir])
-        except ValueError:
-            pass
-    
-    # Prefer current direction if still available
-    if current_dir in directions:
-        chosen_dir = current_dir
-    else:
-        # Pick first available
-        chosen_dir = directions[0] if directions else "RIGHT"
-    
-    # Decide whether to use boost
-    # Use boost in mid-game when we still have them
-    use_boost = my_boosts > 0 and 30 <= turn_count <= 80
-    
-    if use_boost:
-        return f"{chosen_dir}:BOOST"
-    else:
-        return chosen_dir
 
 
 if __name__ == "__main__":
