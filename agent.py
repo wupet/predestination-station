@@ -12,8 +12,6 @@ from agentc import AgentC
 
 app = Flask(__name__)
 
-agent = AgentW()
-
 # Basic identity
 PARTICIPANT = os.getenv("PARTICIPANT", "SampleParticipant")
 AGENT_NAME = os.getenv("AGENT_NAME", "SampleAgent")
@@ -33,6 +31,7 @@ game_state = {
     "player_number": 1,
 }
 
+agent = AgentS() if game_state["player_number"] == 1 else AgentW()
 
 @app.route("/", methods=["GET"])
 def info():
