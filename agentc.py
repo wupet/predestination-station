@@ -45,7 +45,13 @@ class AgentC:
             
             # Determine if we should be aggressive or defensive
             should_be_aggressive = my_length > opponent_length
+            
+            # Player 2 should avoid head-on collisions even when aggressive
+            avoid_head_on = (player_number == 2)
+            
             print(f"Strategy: {'AGGRESSIVE (longer trail)' if should_be_aggressive else 'DEFENSIVE (shorter trail)'}")
+            if avoid_head_on:
+                print("Player 2: Avoiding head-on collisions")
             
             # Update current direction from trail
             if len(my_trail) >= 2:
@@ -94,7 +100,7 @@ class AgentC:
                 # Aggressive: Try to intercept and collide
                 best_move = self._find_interception_move(
                     my_head, opponent_head, predicted_opp_pos,
-                    board, my_trail, opponent_trail, height, width
+                    board, my_trail, opponent_trail, height, width, avoid_head_on
                 )
                 print(f"Interception move: {best_move}")
                 
@@ -102,14 +108,14 @@ class AgentC:
                     # Fallback to aggressive chase
                     best_move = self._find_aggressive_chase(
                         my_head, opponent_head, board, 
-                        my_trail, opponent_trail, height, width
+                        my_trail, opponent_trail, height, width, avoid_head_on
                     )
                     print(f"Aggressive chase move: {best_move}")
             else:
                 # Defensive: Prioritize survival and space control
                 best_move = self._find_space_control_move(
                     my_head, opponent_head, board, 
-                    my_trail, opponent_trail, height, width
+                    my_trail, opponent_trail, height, width, avoid_head_on
                 )
                 print(f"Space control move: {best_move}")
                 
@@ -117,14 +123,14 @@ class AgentC:
                     # Try to move away from opponent
                     best_move = self._find_evasive_move(
                         my_head, opponent_head, board, 
-                        my_trail, opponent_trail, height, width
+                        my_trail, opponent_trail, height, width, avoid_head_on
                     )
                     print(f"Evasive move: {best_move}")
             
             if best_move is None:
                 # Last resort: find any safe move
                 best_move = self._find_safe_move(
-                    my_head, board, my_trail, opponent_trail, height, width
+                    my_head, board, my_trail, opponent_trail, height, width, avoid_head_on
                 )
                 print(f"Safe move: {best_move}")
             
@@ -210,9 +216,10 @@ class AgentC:
         return (new_x, new_y)
 
     def _find_interception_move(self, my_pos, opp_pos, predicted_opp_pos,
-                                 board, my_trail, opp_trail, height, width):
+                                 board, my_trail, opp_trail, height, width, avoid_head_on=False):
         """
         Find move that intercepts opponent's predicted path for head-on collision
+        If avoid_head_on is True, stays close but avoids direct collision paths
         """
         directions = {
             "UP": (0, -1),
@@ -236,8 +243,25 @@ class AgentC:
             new_y = (my_pos[1] + dy) % height
             new_pos = (new_x, new_y)
             
+            # If avoiding head-on collisions, perform extensive collision checks
+            if avoid_head_on:
+                # Check if we'd move into opponent's current head
+                if new_pos == opp_pos:
+                    print(f"  {move_name}: Skipped (opponent's current head)")
+                    continue
+                
+                # Check if we'd hit opponent's predicted position (head-on)
+                if new_pos == predicted_opp_pos:
+                    print(f"  {move_name}: Skipped (opponent's predicted position)")
+                    continue
+                
+                # Check if we're moving toward a collision path
+                if self._is_moving_toward_collision(new_pos, opp_pos, predicted_opp_pos, width, height):
+                    print(f"  {move_name}: Skipped (collision path detected)")
+                    continue
+            
             # Check if move is valid
-            if not self._is_position_safe(new_pos, board, my_trail, opp_trail):
+            if not self._is_position_safe(new_pos, board, my_trail, opp_trail, avoid_head_on):
                 print(f"  {move_name}: Unsafe position {new_pos}")
                 continue
             
@@ -254,13 +278,24 @@ class AgentC:
             # and are on collision course
             score = dist_to_predicted
             
-            # Bonus for being very close (collision imminent)
-            if dist_to_current <= 2:
-                score -= 10
-            
-            # Check if we're moving toward opponent's predicted path
-            if self._is_on_collision_course(new_pos, predicted_opp_pos, (dx, dy), width, height):
-                score -= 5
+            if avoid_head_on:
+                # Player 2: Stay close but maintain minimum safe distance of 2
+                if dist_to_current < 2:
+                    score += 30  # Heavy penalty for being too close
+                elif dist_to_current == 2:
+                    score -= 10  # Bonus for being exactly at safe distance
+                elif dist_to_current <= 4:
+                    score -= 5  # Bonus for being in sweet spot
+                elif dist_to_current > 6:
+                    score += 5  # Slight penalty for being too far
+            else:
+                # Player 1: Bonus for being very close (collision imminent)
+                if dist_to_current <= 2:
+                    score -= 10
+                
+                # Check if we're moving toward opponent's predicted path
+                if self._is_on_collision_course(new_pos, predicted_opp_pos, (dx, dy), width, height):
+                    score -= 5
             
             print(f"  {move_name}: Score {score} (dist to predicted: {dist_to_predicted}, dist to current: {dist_to_current})")
             
@@ -270,6 +305,43 @@ class AgentC:
         
         print(f"  Valid moves: {valid_moves}, Best: {best_move}")
         return best_move
+
+    def _is_moving_toward_collision(self, my_new_pos, opp_current_pos, opp_predicted_pos, width, height):
+        """
+        Check if moving to my_new_pos would put us on a collision path with opponent
+        This checks if opponent's next move could collide with our new position
+        Player 2 needs to be extra careful since Player 1 moves first
+        """
+        # Get all possible positions opponent could move to from current position
+        opponent_possible_moves = [
+            ((opp_current_pos[0] + dx) % width, (opp_current_pos[1] + dy) % height)
+            for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]
+        ]
+        
+        # CRITICAL: Check if our new position is exactly where opponent might move
+        # Since P1 moves first, P1 will occupy this position before us
+        if my_new_pos in opponent_possible_moves:
+            print(f"    Collision risk: Our target {my_new_pos} is in opponent's possible moves {opponent_possible_moves}")
+            return True
+        
+        # Check if we're moving to the same spot as predicted
+        if my_new_pos == opp_predicted_pos:
+            print(f"    Collision risk: Moving to opponent's predicted position {opp_predicted_pos}")
+            return True
+        
+        # Check if we're within distance 1 of opponent's current position
+        dist_to_current = self._torus_distance(my_new_pos, opp_current_pos, width, height)
+        if dist_to_current <= 1:
+            print(f"    Collision risk: Distance {dist_to_current} to opponent current position")
+            return True
+        
+        # Check if we're within distance 1 of opponent's predicted position
+        dist_to_predicted = self._torus_distance(my_new_pos, opp_predicted_pos, width, height)
+        if dist_to_predicted <= 1:
+            print(f"    Collision risk: Distance {dist_to_predicted} to opponent predicted position")
+            return True
+        
+        return False
 
     def _is_on_collision_course(self, my_pos, target_pos, my_dir, width, height):
         """Check if current direction leads toward target"""
@@ -282,9 +354,10 @@ class AgentC:
         
         return next_dist < current_dist
 
-    def _find_aggressive_chase(self, my_pos, opp_pos, board, my_trail, opp_trail, height, width):
+    def _find_aggressive_chase(self, my_pos, opp_pos, board, my_trail, opp_trail, height, width, avoid_head_on=False):
         """
         Aggressive chase - move directly toward opponent
+        If avoid_head_on, maintains safe distance of 2-4 units
         """
         directions = {
             "UP": (0, -1),
@@ -294,7 +367,11 @@ class AgentC:
         }
         
         best_move = None
-        best_distance = float('inf')
+        best_score = float('inf')
+        
+        # Predict where opponent will be
+        opponent_dir = self._predict_opponent_direction(opp_trail)
+        predicted_opp_pos = self._get_predicted_position(opp_pos, opponent_dir, width, height)
         
         for move_name, (dx, dy) in directions.items():
             # Skip if this is opposite to current direction (invalid move)
@@ -305,16 +382,32 @@ class AgentC:
             new_y = (my_pos[1] + dy) % height
             new_pos = (new_x, new_y)
             
-            if self._is_position_safe(new_pos, board, my_trail, opp_trail):
+            # Check for collision path if avoiding
+            if avoid_head_on and self._is_moving_toward_collision(new_pos, opp_pos, predicted_opp_pos, width, height):
+                continue
+            
+            if self._is_position_safe(new_pos, board, my_trail, opp_trail, avoid_head_on):
                 distance = self._torus_distance(new_pos, opp_pos, width, height)
                 
-                if distance < best_distance:
-                    best_distance = distance
+                if avoid_head_on:
+                    # Player 2: Optimize for distance of 2-4
+                    if distance < 2:
+                        score = distance + 10  # Too close, add penalty
+                    elif 2 <= distance <= 4:
+                        score = distance - 5  # Sweet spot, give bonus
+                    else:
+                        score = distance  # Normal scoring
+                else:
+                    # Player 1: Get as close as possible
+                    score = distance
+                
+                if score < best_score:
+                    best_score = score
                     best_move = move_name
         
         return best_move
 
-    def _find_space_control_move(self, my_pos, opp_pos, board, my_trail, opp_trail, height, width):
+    def _find_space_control_move(self, my_pos, opp_pos, board, my_trail, opp_trail, height, width, avoid_head_on=False):
         """
         Defensive strategy: Find moves that maximize available space
         """
@@ -337,7 +430,7 @@ class AgentC:
             new_y = (my_pos[1] + dy) % height
             new_pos = (new_x, new_y)
             
-            if self._is_position_safe(new_pos, board, my_trail, opp_trail):
+            if self._is_position_safe(new_pos, board, my_trail, opp_trail, avoid_head_on):
                 # Calculate available space using flood fill
                 available_space = self._calculate_available_space(
                     new_pos, board, my_trail, opp_trail, height, width
@@ -351,7 +444,7 @@ class AgentC:
         
         return best_move
 
-    def _find_evasive_move(self, my_pos, opp_pos, board, my_trail, opp_trail, height, width):
+    def _find_evasive_move(self, my_pos, opp_pos, board, my_trail, opp_trail, height, width, avoid_head_on=False):
         """
         Evasive strategy: Move away from opponent while staying safe
         """
@@ -374,7 +467,7 @@ class AgentC:
             new_y = (my_pos[1] + dy) % height
             new_pos = (new_x, new_y)
             
-            if self._is_position_safe(new_pos, board, my_trail, opp_trail):
+            if self._is_position_safe(new_pos, board, my_trail, opp_trail, avoid_head_on):
                 # Calculate distance from opponent (we want to maximize this)
                 distance = self._torus_distance(new_pos, opp_pos, width, height)
                 
@@ -447,24 +540,31 @@ class AgentC:
         dx_cur, dy_cur = current_dir
         return (dx_new, dy_new) == (-dx_cur, -dy_cur)
 
-    def _is_position_safe(self, pos, board, my_trail, opp_trail):
+    def _is_position_safe(self, pos, board, my_trail, opp_trail, avoid_head_on=False):
         """Check if position is safe to move to"""
         x, y = pos
         
         # In Tron, trails are permanent. We cannot move into any trail position
-        # EXCEPT we want to allow moving into opponent's head for head-on collision
+        # Player 2 must be extremely careful about head-on collisions
         
         # Check if position is in our trail
         if pos in my_trail:
             return False
         
         # Check if position is in opponent's trail
-        # Allow moving to opponent's current head position (for head-on collision)
         if len(opp_trail) > 0:
             opponent_head = tuple(opp_trail[-1])
-            # Allow head-on collision
+            
+            # Check if this is opponent's current head position
             if pos == opponent_head:
-                return True
+                if avoid_head_on:
+                    # Player 2: NEVER move into opponent's head - P1 moves first and will win
+                    print(f"    Unsafe: Would move into opponent's head at {pos}")
+                    return False
+                else:
+                    # Player 1: Allow moving into opponent's head for collision
+                    return True
+            
             # Don't move into opponent's trail body
             if pos in [tuple(p) for p in opp_trail]:
                 return False
