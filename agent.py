@@ -50,6 +50,7 @@ def receive_state():
     # Update our local game state
     game_state.update(data)
     
+    print(data)
     return jsonify({"status": "state received"}), 200
 
 
